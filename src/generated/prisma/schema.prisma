@@ -1,0 +1,331 @@
+// This is your Prisma schema file for 4SpeedMotorcycle
+// Learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// USER MANAGEMENT
+// ============================================================================
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  phone     String?
+  image     String?
+
+  // Authentication
+  emailVerified DateTime?
+
+  // Vehicle preferences
+  preferredVehicleId String?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  accounts     Account[]
+  sessions     Session[]
+  addresses    Address[]
+  vehicles     UserVehicle[]
+  cartItems    CartItem[]
+  orders       Order[]
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ============================================================================
+// VEHICLE MANAGEMENT
+// ============================================================================
+
+model UserVehicle {
+  id         String  @id @default(cuid())
+  userId     String
+
+  // Vehicle details
+  make       String
+  model      String
+  year       Int
+  engineSize String?
+
+  // Vehicle identification for WPS API
+  wpsVehicleId String? // Store WPS vehicle ID for API calls
+
+  // User preferences
+  isPrimary  Boolean @default(false)
+  nickname   String? // e.g., "My Honda", "Work Bike"
+
+  // Timestamps
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, make, model, year]) // Prevent duplicate vehicles
+  @@map("user_vehicles")
+}
+
+// ============================================================================
+// ADDRESS MANAGEMENT
+// ============================================================================
+
+model Address {
+  id        String  @id @default(cuid())
+  userId    String
+  type      AddressType
+
+  // Address fields
+  firstName String
+  lastName  String
+  company   String?
+  street    String
+  street2   String?
+  city      String
+  state     String
+  zipCode   String
+  country   String  @default("USA")
+
+  // Preferences
+  isDefault Boolean @default(false)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("addresses")
+}
+
+enum AddressType {
+  SHIPPING
+  BILLING
+  BOTH
+}
+
+// ============================================================================
+// SHOPPING CART
+// ============================================================================
+
+model CartItem {
+  id          String  @id @default(cuid())
+  userId      String
+
+  // Product details from WPS
+  sku         String  // WPS SKU
+  quantity    Int
+  priceAtAdd  Decimal @db.Decimal(10, 2) // Price when added to cart
+
+  // Vehicle compatibility context
+  vehicleId   String? // Which vehicle this was added for
+
+  // Timestamps
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, sku]) // One item per SKU per user
+  @@map("cart_items")
+}
+
+// ============================================================================
+// ORDER MANAGEMENT
+// ============================================================================
+
+model Order {
+  id          String      @id @default(cuid())
+  userId      String?     // Nullable for guest checkout
+  orderNumber String      @unique
+  status      OrderStatus @default(PENDING)
+
+  // Customer info (for guest orders)
+  guestEmail  String?
+  guestPhone  String?
+
+  // Pricing breakdown
+  subtotal    Decimal @db.Decimal(10, 2)
+  tax         Decimal @db.Decimal(10, 2)
+  shipping    Decimal @db.Decimal(10, 2)
+  discount    Decimal @db.Decimal(10, 2) @default(0)
+  total       Decimal @db.Decimal(10, 2)
+
+  // Addresses (stored as JSON for flexibility)
+  shippingAddress Json
+  billingAddress  Json
+
+  // Payment information
+  stripePaymentIntentId String?
+  paymentStatus         PaymentStatus @default(PENDING)
+  paymentMethod         String? // "card", "ach", etc.
+
+  // Fulfillment
+  trackingNumber        String?
+  shippedAt            DateTime?
+  deliveredAt          DateTime?
+
+  // Notes
+  customerNotes         String?
+  internalNotes         String?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  user      User?       @relation(fields: [userId], references: [id])
+  items     OrderItem[]
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id          String  @id @default(cuid())
+  orderId     String
+
+  // Product details (snapshot at time of order)
+  sku         String
+  quantity    Int
+  unitPrice   Decimal @db.Decimal(10, 2)
+  totalPrice  Decimal @db.Decimal(10, 2)
+
+  // Product info snapshot (in case WPS data changes)
+  productName  String
+  productImage String?
+  brandName    String?
+
+  // Vehicle context
+  vehicleInfo  Json? // Snapshot of vehicle this was ordered for
+
+  // Relations
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@map("order_items")
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  PAID
+  FAILED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+// ============================================================================
+// PRODUCT CACHE (Optional - for performance)
+// ============================================================================
+
+model ProductCache {
+  id          String   @id @default(cuid())
+  sku         String   @unique
+
+  // Cached product data from WPS
+  productData Json
+
+  // Cache metadata
+  lastFetched DateTime @default(now())
+  isActive    Boolean  @default(true)
+
+  @@map("product_cache")
+}
+
+// ============================================================================
+// VEHICLE COMPATIBILITY CACHE
+// ============================================================================
+
+model VehicleCompatibility {
+  id              String   @id @default(cuid())
+
+  // Vehicle details
+  make            String
+  model           String
+  year            Int
+  wpsVehicleId    String?
+
+  // Compatible products (stored as array of SKUs)
+  compatibleSkus  String[] // Array of SKUs that fit this vehicle
+
+  // Cache metadata
+  lastUpdated     DateTime @default(now())
+  isActive        Boolean  @default(true)
+
+  @@unique([make, model, year])
+  @@map("vehicle_compatibility")
+}
+
+// ============================================================================
+// SYSTEM TABLES
+// ============================================================================
+
+model AppConfig {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("app_config")
+}
