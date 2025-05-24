@@ -23,20 +23,34 @@ const getWPSConfig = () => {
   }
 };
 
-// Basic type definitions
+// Updated type definitions based on actual WPS API response
 export interface WPSProduct {
   id: string;
   sku: string;
   name: string;
   description?: string;
   price: number;
+  listPrice?: number;
+  dealerPrice?: number;
   brand?: string;
+  brandId?: string;
   category?: string;
+  productType?: string;
   images?: string[];
   inventory?: {
     quantity: number;
     inStock: boolean;
   };
+  dimensions?: {
+    length?: number;
+    width?: number;
+    height?: number;
+    weight?: number;
+  };
+  upc?: string;
+  status?: string;
+  mappPrice?: number;
+  dropShipEligible?: boolean;
 }
 
 export interface WPSVehicle {
@@ -68,9 +82,13 @@ export interface WPSVehicleYear {
 export interface WPSApiResponse<T> {
   data: T;
   meta?: {
-    total?: number;
-    page?: number;
-    perPage?: number;
+    pagination?: {
+      total?: number;
+      count?: number;
+      per_page?: number;
+      current_page?: number;
+      total_pages?: number;
+    };
   };
 }
 
@@ -78,8 +96,43 @@ export interface ProductFilters {
   category?: string;
   search?: string;
   vehicleId?: string;
+  brandId?: string;
+  productType?: string;
   page?: number;
   limit?: number;
+}
+
+// WPS API Raw Response Types (based on actual API structure)
+interface WPSRawItem {
+  id: number;
+  brand_id: number;
+  product_id: number;
+  sku: string;
+  name: string;
+  list_price: string;
+  standard_dealer_price: string;
+  supplier_product_id?: string;
+  length?: number;
+  width?: number;
+  height?: number;
+  weight?: number;
+  upc?: string;
+  status_id: string;
+  status: string;
+  product_type?: string;
+  mapp_price: string;
+  drop_ship_eligible: boolean;
+  drop_ship_fee?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface WPSRawImage {
+  id: number;
+  item_id: number;
+  url: string;
+  alt_text?: string;
+  sort_order?: number;
 }
 
 // Main WPS API Client Class
@@ -131,87 +184,174 @@ export class WPSClient {
   ): Promise<WPSApiResponse<WPSProduct[]>> {
     const params = new URLSearchParams();
 
+    // Add filters based on WPS API documentation
     if (filters.search) {
-      params.set("filter[name]", filters.search);
+      params.set("search", filters.search);
     }
-    if (filters.category) {
-      params.set("filter[category]", filters.category);
+    if (filters.category || filters.productType) {
+      params.set("product_type", filters.category || filters.productType!);
     }
-    if (filters.vehicleId) {
-      params.set("filter[vehicle]", filters.vehicleId);
+    if (filters.brandId) {
+      params.set("brand_id", filters.brandId);
     }
 
-    // Include related data
-    params.set("include", "inventory,images,brand");
-
-    // Pagination
-    params.set("page[size]", String(filters.limit || 24));
+    // // Pagination
+    params.set("per_page", String(filters.limit || 24));
     if (filters.page) {
-      params.set("page[number]", String(filters.page));
+      params.set("page", String(filters.page));
     }
 
     const queryString = params.toString();
     const endpoint = `/items${queryString ? `?${queryString}` : ""}`;
 
-    return this.fetch<WPSApiResponse<WPSProduct[]>>(endpoint);
+    const response = await this.fetch<{ data: WPSRawItem[] }>(endpoint);
+
+    // Transform and fetch images for each product
+    const transformedProducts = await Promise.all(
+      response.data.map(async (item) => {
+        const images = await this.getProductImages(item.id.toString());
+        return transformWPSProduct(item, images);
+      }),
+    );
+
+    return {
+      data: transformedProducts,
+      meta: {
+        pagination: {
+          total: response.data.length, // WPS API doesn't provide total in this format
+          current_page: filters.page || 1,
+          per_page: filters.limit || 24,
+        },
+      },
+    };
   }
 
   async getProductBySKU(sku: string): Promise<WPSProduct> {
-    const endpoint = `/items/crutch/${sku}?include=inventory,images,features`;
-    const response = await this.fetch<{ data: WPSProduct }>(endpoint);
-    return response.data;
+    // First, search for the product by SKU
+    const searchResponse = await this.fetch<{ data: WPSRawItem[] }>(
+      `/items?sku=${sku}`,
+    );
+
+    if (!searchResponse.data || searchResponse.data.length === 0) {
+      throw new Error(`Product with SKU ${sku} not found`);
+    }
+
+    const item = searchResponse.data[0];
+    const images = await this.getProductImages(item.id.toString());
+
+    return transformWPSProduct(item, images);
   }
 
-  async getInventory(sku: string): Promise<any> {
-    const endpoint = `/items/crutch/${sku}/inventory`;
-    return this.fetch(endpoint);
+  async getProductById(id: string): Promise<WPSProduct> {
+    const response = await this.fetch<WPSRawItem>(`/items/${id}`);
+    const images = await this.getProductImages(id);
+
+    return transformWPSProduct(response, images);
+  }
+
+  async getProductImages(itemId: string): Promise<WPSRawImage[]> {
+    try {
+      const response = await this.fetch<{ data: WPSRawImage[] }>(
+        `/items/${itemId}/images`,
+      );
+      return response.data || [];
+    } catch (error) {
+      console.warn(`Failed to fetch images for item ${itemId}:`, error);
+      return [];
+    }
+  }
+
+  async getMultipleProducts(ids: string[]): Promise<WPSProduct[]> {
+    const idsString = ids.join(",");
+    const response = await this.fetch<{ data: WPSRawItem[] }>(
+      `/items/${idsString}`,
+    );
+
+    // Fetch images for all products in parallel
+    const productsWithImages = await Promise.all(
+      response.data.map(async (item) => {
+        const images = await this.getProductImages(item.id.toString());
+        return transformWPSProduct(item, images);
+      }),
+    );
+
+    return productsWithImages;
+  }
+
+  async getProductVehicles(itemId: string): Promise<WPSVehicle[]> {
+    try {
+      const response = await this.fetch<{ data: any[] }>(
+        `/items/${itemId}/vehicles`,
+      );
+      return response.data.map(transformWPSVehicle);
+    } catch (error) {
+      console.warn(`Failed to fetch vehicles for item ${itemId}:`, error);
+      return [];
+    }
   }
 
   // VEHICLE METHODS
   async getVehicleMakes(): Promise<WPSVehicleMake[]> {
-    const response =
-      await this.fetch<WPSApiResponse<WPSVehicleMake[]>>("/vehiclemakes");
-    return response.data;
+    const response = await this.fetch<{ data: any[] }>("/vehiclemakes");
+    return response.data.map((make: any) => ({
+      id: make.id.toString(),
+      name: make.name,
+    }));
   }
 
   async getVehicleModels(makeId?: string): Promise<WPSVehicleModel[]> {
     const params = new URLSearchParams();
     if (makeId) {
-      params.set("filter[make_id]", makeId);
+      params.set("make_id", makeId);
     }
 
     const queryString = params.toString();
     const endpoint = `/vehiclemodels${queryString ? `?${queryString}` : ""}`;
 
-    const response =
-      await this.fetch<WPSApiResponse<WPSVehicleModel[]>>(endpoint);
-    return response.data;
+    const response = await this.fetch<{ data: any[] }>(endpoint);
+    return response.data.map((model: any) => ({
+      id: model.id.toString(),
+      name: model.name,
+      makeId: model.make_id.toString(),
+    }));
   }
 
   async getVehicleYears(modelId?: string): Promise<WPSVehicleYear[]> {
     const params = new URLSearchParams();
     if (modelId) {
-      params.set("filter[model_id]", modelId);
+      params.set("model_id", modelId);
     }
 
     const queryString = params.toString();
     const endpoint = `/vehicleyears${queryString ? `?${queryString}` : ""}`;
 
-    const response =
-      await this.fetch<WPSApiResponse<WPSVehicleYear[]>>(endpoint);
-    return response.data;
+    const response = await this.fetch<{ data: any[] }>(endpoint);
+    return response.data.map((year: any) => ({
+      id: year.id.toString(),
+      year: parseInt(year.year),
+      modelId: year.model_id.toString(),
+    }));
   }
 
   async getVehicles(): Promise<WPSVehicle[]> {
-    const response =
-      await this.fetch<WPSApiResponse<WPSVehicle[]>>("/vehicles");
-    return response.data;
+    const response = await this.fetch<{ data: any[] }>("/vehicles");
+    return response.data.map(transformWPSVehicle);
   }
 
   async getItemsByVehicle(vehicleId: string): Promise<WPSProduct[]> {
-    const endpoint = `/vehicles/${vehicleId}/items?include=inventory,images,brand`;
-    const response = await this.fetch<WPSApiResponse<WPSProduct[]>>(endpoint);
-    return response.data;
+    const response = await this.fetch<{ data: WPSRawItem[] }>(
+      `/vehicles/${vehicleId}/items`,
+    );
+
+    // Fetch images for all products
+    const productsWithImages = await Promise.all(
+      response.data.map(async (item) => {
+        const images = await this.getProductImages(item.id.toString());
+        return transformWPSProduct(item, images);
+      }),
+    );
+
+    return productsWithImages;
   }
 
   // VEHICLE COMPATIBILITY
@@ -231,7 +371,7 @@ export class WPSClient {
   // UTILITY METHODS
   async testConnection(): Promise<boolean> {
     try {
-      await this.fetch("/vehiclemakes?page[size]=1");
+      await this.fetch("/vehiclemakes?per_page=1");
       return true;
     } catch (error) {
       console.error("WPS API connection test failed:", error);
@@ -244,20 +384,37 @@ export class WPSClient {
 export const wpsClient = new WPSClient();
 
 // Helper functions for data transformation
-export function transformWPSProduct(wpsData: any): WPSProduct {
+export function transformWPSProduct(
+  wpsData: WPSRawItem,
+  images: WPSRawImage[] = [],
+): WPSProduct {
   return {
-    id: wpsData.id?.toString() || "",
-    sku: wpsData.sku || "",
-    name: wpsData.name || wpsData.title || "",
-    description: wpsData.description || wpsData.summary || "",
-    price: parseFloat(wpsData.price || wpsData.retail_price || "0"),
-    brand: wpsData.brand?.name || wpsData.manufacturer || "",
-    category: wpsData.category?.name || wpsData.primary_category || "",
-    images: wpsData.images?.map((img: any) => img.url || img.src) || [],
+    id: wpsData.id.toString(),
+    sku: wpsData.sku,
+    name: wpsData.name,
+    description: wpsData.supplier_product_id || "", // Use supplier product ID as description for now
+    price: parseFloat(wpsData.standard_dealer_price || "0"),
+    listPrice: parseFloat(wpsData.list_price || "0"),
+    dealerPrice: parseFloat(wpsData.standard_dealer_price || "0"),
+    brand: "", // Will need to fetch from brand endpoint if needed
+    brandId: wpsData.brand_id.toString(),
+    category: wpsData.product_type || "",
+    productType: wpsData.product_type || "",
+    images: images.map((img) => img.url),
     inventory: {
-      quantity: parseInt(wpsData.inventory?.quantity || "0"),
-      inStock: (wpsData.inventory?.quantity || 0) > 0,
+      quantity: wpsData.status === "Active" ? 1 : 0, // Simplified - WPS doesn't provide quantity in this response
+      inStock: wpsData.status === "Active",
     },
+    dimensions: {
+      length: wpsData.length,
+      width: wpsData.width,
+      height: wpsData.height,
+      weight: wpsData.weight,
+    },
+    upc: wpsData.upc || undefined,
+    status: wpsData.status,
+    mappPrice: parseFloat(wpsData.mapp_price || "0"),
+    dropShipEligible: wpsData.drop_ship_eligible,
   };
 }
 

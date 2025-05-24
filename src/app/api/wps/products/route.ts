@@ -1,6 +1,6 @@
 // src/app/api/wps/products/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { wpsClient, transformWPSProduct } from "@/lib/wps-client";
+import { wpsClient } from "@/lib/wps-client";
 
 export async function GET(request: NextRequest) {
   try {
@@ -9,6 +9,8 @@ export async function GET(request: NextRequest) {
     const filters = {
       search: searchParams.get("search") || undefined,
       category: searchParams.get("category") || undefined,
+      productType: searchParams.get("productType") || undefined,
+      brandId: searchParams.get("brandId") || undefined,
       vehicleId: searchParams.get("vehicleId") || undefined,
       page: searchParams.get("page") ? parseInt(searchParams.get("page")!) : 1,
       limit: searchParams.get("limit")
@@ -16,14 +18,13 @@ export async function GET(request: NextRequest) {
         : 24,
     };
 
-    const response = await wpsClient.getProducts(filters);
+    console.log("Fetching products with filters:", filters);
 
-    // Transform the data to our format
-    const transformedProducts = response.data.map(transformWPSProduct);
+    const response = await wpsClient.getProducts(filters);
 
     return NextResponse.json({
       success: true,
-      data: transformedProducts,
+      data: response.data,
       meta: response.meta || {},
     });
   } catch (error) {

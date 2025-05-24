@@ -10,11 +10,12 @@ import {
   List,
   AlertCircle,
   Loader2,
-  ShoppingCart,
+  SlidersHorizontal,
 } from "lucide-react";
-import { useProducts, useVehicleProducts } from "@/hooks/useWPS";
-import { formatCurrency } from "@/lib/utils";
+import { useProducts } from "@/hooks/useWPS";
+import { WPSProduct } from "@/lib/wps-client";
 import Header from "@/components/layout/Header";
+import ProductCard from "@/components/products/ProductCard";
 
 function ProductsPageContent() {
   const searchParams = useSearchParams();
@@ -24,43 +25,52 @@ function ProductsPageContent() {
   const [selectedCategory, setSelectedCategory] = useState(
     searchParams.get("category") || "",
   );
+  const [selectedBrand, setSelectedBrand] = useState(
+    searchParams.get("brand") || "",
+  );
   const [currentPage, setCurrentPage] = useState(1);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [showFilters, setShowFilters] = useState(false);
 
   // Get vehicle info from URL if vehicle-specific search
   const vehicleId = searchParams.get("vehicleId");
   const vehicleString = searchParams.get("vehicle");
 
-  // Use appropriate hook based on whether this is a vehicle-specific search
-  const productsQuery = useProducts({
-    search: searchQuery,
-    category: selectedCategory,
-    vehicleId: vehicleId || undefined,
-    page: currentPage,
-    limit: 24,
-  });
-
-  const vehicleProductsQuery = useVehicleProducts(vehicleId || undefined);
-
-  // Choose which query result to use
   const {
     data: products,
     loading,
     error,
     refetch,
-  } = vehicleId ? vehicleProductsQuery : productsQuery;
+  } = useProducts({
+    search: searchQuery,
+    category: selectedCategory,
+    brandId: selectedBrand,
+    vehicleId: vehicleId || undefined,
+    page: currentPage,
+    limit: 24,
+  });
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     setCurrentPage(1);
-    // Update URL with search params
-    const params = new URLSearchParams();
-    if (searchQuery) params.set("search", searchQuery);
-    if (selectedCategory) params.set("category", selectedCategory);
-    if (vehicleId) params.set("vehicleId", vehicleId);
-    if (vehicleString) params.set("vehicle", vehicleString);
+    refetch();
+  };
 
-    window.history.pushState({}, "", `/products?${params.toString()}`);
+  const handleAddToCart = (product: WPSProduct) => {
+    console.log("Adding to cart:", product);
+    // TODO: Implement cart functionality
+  };
+
+  const handleQuickView = (product: WPSProduct) => {
+    console.log("Quick view:", product);
+    // TODO: Implement quick view modal
+  };
+
+  const resetFilters = () => {
+    setSearchQuery("");
+    setSelectedCategory("");
+    setSelectedBrand("");
+    setCurrentPage(1);
   };
 
   return (
@@ -84,20 +94,40 @@ function ProductsPageContent() {
                 </p>
               </div>
 
-              {/* View Toggle */}
-              <div className="flex items-center gap-2">
+              {/* View Toggle and Filters */}
+              <div className="flex items-center gap-4">
+                {/* Mobile Filter Toggle */}
                 <button
-                  onClick={() => setViewMode("grid")}
-                  className={`p-2 rounded ${viewMode === "grid" ? "bg-red-600 text-white" : "bg-gray-200 text-gray-600"}`}
+                  onClick={() => setShowFilters(!showFilters)}
+                  className="md:hidden flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
                 >
-                  <Grid className="w-5 h-5" />
+                  <SlidersHorizontal className="w-4 h-4" />
+                  Filters
                 </button>
-                <button
-                  onClick={() => setViewMode("list")}
-                  className={`p-2 rounded ${viewMode === "list" ? "bg-red-600 text-white" : "bg-gray-200 text-gray-600"}`}
-                >
-                  <List className="w-5 h-5" />
-                </button>
+
+                {/* View Toggle */}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setViewMode("grid")}
+                    className={`p-2 rounded ${
+                      viewMode === "grid"
+                        ? "bg-red-600 text-white"
+                        : "bg-gray-200 text-gray-600"
+                    }`}
+                  >
+                    <Grid className="w-5 h-5" />
+                  </button>
+                  <button
+                    onClick={() => setViewMode("list")}
+                    className={`p-2 rounded ${
+                      viewMode === "list"
+                        ? "bg-red-600 text-white"
+                        : "bg-gray-200 text-gray-600"
+                    }`}
+                  >
+                    <List className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -106,15 +136,25 @@ function ProductsPageContent() {
         <div className="max-w-7xl mx-auto px-6 py-8">
           <div className="flex flex-col lg:flex-row gap-8">
             {/* Sidebar Filters */}
-            <div className="lg:w-64 flex-shrink-0">
-              <div className="bg-white p-6 rounded-lg shadow-sm">
-                <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                  <Filter className="w-5 h-5" />
-                  Filters
-                </h3>
+            <div
+              className={`lg:w-64 flex-shrink-0 ${showFilters ? "block" : "hidden lg:block"}`}
+            >
+              <div className="bg-white p-6 rounded-lg shadow-sm space-y-6">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                    <Filter className="w-5 h-5" />
+                    Filters
+                  </h3>
+                  <button
+                    onClick={resetFilters}
+                    className="text-sm text-red-600 hover:text-red-800 font-medium"
+                  >
+                    Clear All
+                  </button>
+                </div>
 
                 {/* Search */}
-                <form onSubmit={handleSearch} className="mb-6">
+                <form onSubmit={handleSearch}>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Search Products
                   </label>
@@ -123,7 +163,7 @@ function ProductsPageContent() {
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search parts..."
+                      placeholder="Search parts, SKU, brand..."
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
                     />
                     <button
@@ -136,7 +176,7 @@ function ProductsPageContent() {
                 </form>
 
                 {/* Category Filter */}
-                <div className="mb-6">
+                <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Category
                   </label>
@@ -149,12 +189,14 @@ function ProductsPageContent() {
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
                   >
                     <option value="">All Categories</option>
-                    <option value="engine">Engine & Performance</option>
-                    <option value="suspension">Suspension & Handling</option>
-                    <option value="brakes">Brakes & Safety</option>
-                    <option value="body">Body & Styling</option>
-                    <option value="electrical">Electrical & Lighting</option>
-                    <option value="tools">Tools & Maintenance</option>
+                    <option value="Engine">Engine & Performance</option>
+                    <option value="Suspension">Suspension & Handling</option>
+                    <option value="Brakes">Brakes & Safety</option>
+                    <option value="Body">Body & Styling</option>
+                    <option value="Electrical">Electrical & Lighting</option>
+                    <option value="Tools">Tools & Maintenance</option>
+                    <option value="Exhaust">Exhaust Systems</option>
+                    <option value="Filtration">Filtration</option>
                   </select>
                 </div>
 
@@ -162,12 +204,36 @@ function ProductsPageContent() {
                 {vehicleString && (
                   <div className="bg-red-50 p-4 rounded-lg">
                     <h4 className="font-medium text-red-900 mb-2">
-                      Your Vehicle
+                      Selected Vehicle
                     </h4>
-                    <p className="text-red-800 text-sm">{vehicleString}</p>
-                    <button className="text-red-600 text-sm underline mt-2">
-                      Change Vehicle
+                    <p className="text-red-800 text-sm mb-3">{vehicleString}</p>
+                    <button
+                      onClick={() => (window.location.href = "/products")}
+                      className="text-red-600 text-sm underline hover:text-red-800"
+                    >
+                      View All Products
                     </button>
+                  </div>
+                )}
+
+                {/* Active filters summary */}
+                {(searchQuery || selectedCategory || selectedBrand) && (
+                  <div className="border-t border-gray-200 pt-4">
+                    <h4 className="text-sm font-medium text-gray-700 mb-2">
+                      Active Filters:
+                    </h4>
+                    <div className="space-y-1">
+                      {searchQuery && (
+                        <div className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                          Search: {searchQuery}
+                        </div>
+                      )}
+                      {selectedCategory && (
+                        <div className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
+                          Category: {selectedCategory}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -192,10 +258,10 @@ function ProductsPageContent() {
                     <AlertCircle className="w-5 h-5" />
                     <span className="font-medium">Error Loading Products</span>
                   </div>
-                  <p className="text-red-600">{error}</p>
+                  <p className="text-red-600 mb-4">{error}</p>
                   <button
                     onClick={() => refetch()}
-                    className="mt-4 bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 transition-colors"
+                    className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 transition-colors"
                   >
                     Try Again
                   </button>
@@ -208,8 +274,23 @@ function ProductsPageContent() {
                   {/* Results Info */}
                   <div className="flex items-center justify-between mb-6">
                     <p className="text-gray-600">
-                      {products.length} products found
+                      Showing {products.length} products
+                      {vehicleString && (
+                        <span className="text-green-600 font-medium">
+                          {" "}
+                          compatible with your {vehicleString}
+                        </span>
+                      )}
                     </p>
+
+                    {/* Sort Options */}
+                    <select className="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                      <option>Sort by relevance</option>
+                      <option>Price: Low to High</option>
+                      <option>Price: High to Low</option>
+                      <option>Name: A to Z</option>
+                      <option>Brand</option>
+                    </select>
                   </div>
 
                   {/* Products */}
@@ -221,9 +302,15 @@ function ProductsPageContent() {
                       <h3 className="text-lg font-medium text-gray-900 mb-2">
                         No products found
                       </h3>
-                      <p className="text-gray-600">
+                      <p className="text-gray-600 mb-4">
                         Try adjusting your search or filters
                       </p>
+                      <button
+                        onClick={resetFilters}
+                        className="bg-red-600 text-white px-6 py-2 rounded-lg hover:bg-red-700 transition-colors"
+                      >
+                        Clear Filters
+                      </button>
                     </div>
                   ) : (
                     <div
@@ -234,82 +321,40 @@ function ProductsPageContent() {
                       }`}
                     >
                       {products.map((product) => (
-                        <div
+                        <ProductCard
                           key={product.id}
-                          className={`bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow border border-gray-200 ${
-                            viewMode === "list"
-                              ? "flex gap-4 p-4"
-                              : "overflow-hidden"
-                          }`}
-                        >
-                          {/* Product Image */}
-                          <div
-                            className={`${viewMode === "list" ? "w-32 h-32 flex-shrink-0" : "aspect-square"} bg-gray-100 relative`}
-                          >
-                            {product.images && product.images.length > 0 ? (
-                              <img
-                                src={product.images[0]}
-                                alt={product.name}
-                                className="w-full h-full object-cover"
-                              />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center text-gray-400">
-                                No Image
-                              </div>
-                            )}
-
-                            {/* Stock Badge */}
-                            {product.inventory?.inStock && (
-                              <span className="absolute top-2 right-2 bg-green-500 text-white text-xs px-2 py-1 rounded">
-                                In Stock
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Product Info */}
-                          <div
-                            className={viewMode === "list" ? "flex-1" : "p-4"}
-                          >
-                            {/* Brand */}
-                            {product.brand && (
-                              <div className="text-sm text-red-600 font-semibold mb-1 uppercase tracking-wide">
-                                {product.brand}
-                              </div>
-                            )}
-
-                            {/* Name */}
-                            <h3 className="font-bold text-gray-900 mb-2 line-clamp-2 hover:text-red-600 transition-colors cursor-pointer">
-                              {product.name}
-                            </h3>
-
-                            {/* SKU */}
-                            <p className="text-sm text-gray-500 mb-2">
-                              SKU: {product.sku}
-                            </p>
-
-                            {/* Description */}
-                            {product.description && (
-                              <p className="text-sm text-gray-600 mb-3 line-clamp-2">
-                                {product.description}
-                              </p>
-                            )}
-
-                            {/* Price and Add to Cart */}
-                            <div
-                              className={`flex items-center ${viewMode === "list" ? "justify-between" : "flex-col gap-2"}`}
-                            >
-                              <div className="text-2xl font-bold text-gray-900">
-                                {formatCurrency(product.price)}
-                              </div>
-
-                              <button className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded font-medium transition-colors flex items-center gap-2">
-                                <ShoppingCart className="w-4 h-4" />
-                                Add to Cart
-                              </button>
-                            </div>
-                          </div>
-                        </div>
+                          product={product}
+                          viewMode={viewMode}
+                          showCompatibility={!!vehicleString}
+                          vehicleCompatible={true} // TODO: Implement actual compatibility check
+                          onAddToCart={handleAddToCart}
+                          onQuickView={handleQuickView}
+                        />
                       ))}
+                    </div>
+                  )}
+
+                  {/* Pagination */}
+                  {products.length > 0 && (
+                    <div className="mt-12 flex justify-center">
+                      <div className="flex items-center gap-2">
+                        <button
+                          disabled={currentPage === 1}
+                          onClick={() => setCurrentPage(currentPage - 1)}
+                          className="px-4 py-2 border border-gray-300 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                        >
+                          Previous
+                        </button>
+                        <span className="px-4 py-2 text-gray-600">
+                          Page {currentPage}
+                        </span>
+                        <button
+                          onClick={() => setCurrentPage(currentPage + 1)}
+                          className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+                        >
+                          Next
+                        </button>
+                      </div>
                     </div>
                   )}
                 </>

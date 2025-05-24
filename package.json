@@ -13,10 +13,9 @@
     "db:studio": "prisma studio",
     "db:reset": "prisma migrate reset",
     "db:test": "node scripts/test-connection.js",
-    "db:verify": "node scripts/verify-setup.js",
     "wps:test": "node scripts/test-wps-connection.js",
     "wps:verify": "node scripts/verify-wps-setup.js",
-    "wps:debug": "node scripts/systematic-wps-test.js",
+    "wps:endpoint": "node scripts/quick-endpoint-test.js",
     "setup": "npm run wps:verify && npm run db:test"
   },
   "dependencies": {
