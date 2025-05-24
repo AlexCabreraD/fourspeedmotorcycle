@@ -124,11 +124,11 @@ export default function ProductCard({
             </span>
           )}
 
-          {product.dropShipEligible && (
-            <span className="bg-blue-500 text-white text-xs font-bold px-2 py-1 rounded-full">
-              DROP SHIP
-            </span>
-          )}
+          {/*{product.dropShipEligible && (*/}
+          {/*  <span className="bg-blue-500 text-white text-xs font-bold px-2 py-1 rounded-full">*/}
+          {/*    DROP SHIP*/}
+          {/*  </span>*/}
+          {/*)}*/}
         </div>
 
         {/* Vehicle Compatibility Badge */}
@@ -233,13 +233,6 @@ export default function ProductCard({
                 </span>
               )}
             </div>
-
-            {/* MAPP Price Info */}
-            {product.mappPrice && product.mappPrice > 0 && (
-              <div className="text-xs text-blue-600 font-medium">
-                MAP: {formatCurrency(product.mappPrice)}
-              </div>
-            )}
           </div>
 
           {/* Action Buttons */}

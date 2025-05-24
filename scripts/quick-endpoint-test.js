@@ -3,18 +3,30 @@ config({ path: ".env.local" });
 
 /**
  * Quick test for a specific WPS API endpoint
- * Usage: node scripts/quick-endpoint-test.js [endpoint]
- *
- * Examples:
- * node scripts/quick-endpoint-test.js vehiclemakes
- * node scripts/quick-endpoint-test.js items
- * node scripts/quick-endpoint-test.js vehicles
+ * Usage:
+ *   node scripts/quick-endpoint-test.js [endpoint] [size=10] [include=product,category]
  */
 
 async function testSpecificEndpoint() {
-  const endpoint = process.argv[2] || "vehiclemakes";
+  const args = process.argv.slice(2);
+  const endpoint = args[0] || "vehiclemakes";
 
-  console.log(`🔍 Testing WPS API endpoint: /${endpoint}\n`);
+  let pageSize = "1";
+  let includes = null;
+
+  // Parse optional args
+  args.slice(1).forEach((arg) => {
+    if (arg.startsWith("size=")) {
+      pageSize = arg.split("=")[1];
+    } else if (arg.startsWith("include=")) {
+      includes = arg.split("=")[1];
+    }
+  });
+
+  console.log(`🔍 Testing WPS API endpoint: /${endpoint}`);
+  console.log(`• page[size]=${pageSize}`);
+  if (includes) console.log(`• include=${includes}`);
+  console.log("");
 
   const apiUrl = process.env.WPS_API_URL || process.env.NEXT_PUBLIC_WPS_API_URL;
   const apiToken =
@@ -28,8 +40,13 @@ async function testSpecificEndpoint() {
     process.exit(1);
   }
 
+  // Construct query string
+  const queryParams = [`page[size]=${pageSize}`];
+  if (includes) queryParams.push(`include=${includes}`);
+  const queryString = queryParams.join("&");
+
   try {
-    const url = `${apiUrl}/${endpoint}?page[size]=1`;
+    const url = `${apiUrl}/${endpoint}?${queryString}`;
     console.log(`📡 Fetching: ${url}`);
 
     const response = await fetch(url, {
@@ -55,27 +72,45 @@ async function testSpecificEndpoint() {
     // Quick analysis
     console.log("\n🔍 QUICK ANALYSIS:");
 
+    let imageUrls = [];
+    const isImageEndpoint = endpoint.toLowerCase().startsWith("images");
+
+    const extractImageUrls = (arr) =>
+      arr
+        .filter((item) => item.domain && item.path && item.filename)
+        .map((item) => `${item.domain}${item.path}${item.filename}`);
+
     if (data.data && Array.isArray(data.data)) {
       console.log(`• Type: Array in 'data' property`);
       console.log(`• Count: ${data.data.length} items`);
-
       if (data.data.length > 0) {
         const firstItem = data.data[0];
         console.log(`• First item keys: ${Object.keys(firstItem).join(", ")}`);
         console.log(`• Sample item:`, firstItem);
       }
+      if (isImageEndpoint) imageUrls = extractImageUrls(data.data);
     } else if (Array.isArray(data)) {
       console.log(`• Type: Direct array`);
       console.log(`• Count: ${data.length} items`);
-
       if (data.length > 0) {
         console.log(`• First item keys: ${Object.keys(data[0]).join(", ")}`);
         console.log(`• Sample item:`, data[0]);
       }
-    } else if (data.data && !Array.isArray(data.data)) {
+      if (isImageEndpoint) imageUrls = extractImageUrls(data);
+    } else if (data.data && typeof data.data === "object") {
       console.log(`• Type: Single object in 'data' property`);
       console.log(`• Object keys: ${Object.keys(data.data).join(", ")}`);
       console.log(`• Sample object:`, data.data);
+      if (
+        isImageEndpoint &&
+        data.data.domain &&
+        data.data.path &&
+        data.data.filename
+      ) {
+        imageUrls = [
+          `${data.data.domain}${data.data.path}${data.data.filename}`,
+        ];
+      }
     } else {
       console.log(`• Type: Direct object`);
       console.log(`• Object keys: ${Object.keys(data).join(", ")}`);
@@ -88,30 +123,30 @@ async function testSpecificEndpoint() {
     if (data.links) {
       console.log(`\n🔗 Pagination:`, data.links);
     }
+
+    if (isImageEndpoint && imageUrls.length > 0) {
+      console.log(`\n🖼️ Image URLs:\n${imageUrls.join("\n")}`);
+    }
   } catch (error) {
     console.error("❌ Error:", error.message);
-
     console.log("\n🛠️ Troubleshooting:");
     console.log("• Check if the endpoint name is correct");
     console.log("• Verify your API token has access to this endpoint");
-    console.log(
-      "• Try these common endpoints: vehiclemakes, vehiclemodels, items, vehicles",
-    );
+    console.log("• Try: vehiclemakes, vehiclemodels, items, vehicles, images");
   }
 }
 
 // Show usage if no args
 if (process.argv.length === 2) {
-  console.log("Usage: node scripts/quick-endpoint-test.js [endpoint]");
-  console.log("\nCommon endpoints:");
   console.log(
-    "• vehiclemakes    - List of manufacturers (Honda, Yamaha, etc.)",
+    "Usage: node scripts/quick-endpoint-test.js [endpoint] [size=10] [include=a,b]",
   );
-  console.log("• vehiclemodels   - List of vehicle models");
-  console.log("• vehicleyears    - List of vehicle years");
-  console.log("• vehicles        - Complete vehicle records");
-  console.log("• items           - Product catalog");
-  console.log("\nExample: node scripts/quick-endpoint-test.js vehiclemakes");
+  console.log("\nExamples:");
+  console.log("  node scripts/quick-endpoint-test.js vehiclemakes");
+  console.log("  node scripts/quick-endpoint-test.js images size=5");
+  console.log(
+    "  node scripts/quick-endpoint-test.js items size=5 include=product",
+  );
   process.exit(0);
 }
 

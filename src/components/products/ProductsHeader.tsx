@@ -20,6 +20,7 @@ interface ProductsHeaderProps {
   setShowFilters: (show: boolean) => void;
   sortBy: string;
   onSortChange: (sortBy: string) => void;
+  showPaginationInfo?: boolean; // New optional prop for cursor pagination
 }
 
 export default function ProductsHeader({
@@ -31,6 +32,7 @@ export default function ProductsHeader({
   setShowFilters,
   sortBy,
   onSortChange,
+  showPaginationInfo = true, // Default to true for backwards compatibility
 }: ProductsHeaderProps) {
   return (
     <div className="bg-white border-b border-gray-200">
@@ -45,7 +47,9 @@ export default function ProductsHeader({
                 ? "Compatible parts and accessories for your vehicle"
                 : "Premium motorcycle parts and accessories"}
             </p>
-            {paginationDisplay.total > 0 &&
+            {/* Only show traditional pagination info if enabled */}
+            {showPaginationInfo &&
+              paginationDisplay.total > 0 &&
               paginationDisplay.start > 0 &&
               paginationDisplay.end > 0 && (
                 <p className="text-sm text-gray-500 mt-2">

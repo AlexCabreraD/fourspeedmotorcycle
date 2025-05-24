@@ -1,4 +1,4 @@
-// src/app/api/wps/vehicles/[vehicleId]/products/route.ts - Updated
+// src/app/api/wps/vehicles/[vehicleId]/products/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { wpsClient } from "@/lib/wps-client";
 
@@ -17,20 +17,23 @@ export async function GET(
       );
     }
 
-    const page = searchParams.get("page")
-      ? parseInt(searchParams.get("page")!)
-      : 1;
-    const limit = searchParams.get("limit")
-      ? parseInt(searchParams.get("limit")!)
-      : 24;
+    const cursor = searchParams.get("cursor") || undefined; // Changed from page
+    const pageSize = searchParams.get("pageSize")
+      ? parseInt(searchParams.get("pageSize")!)
+      : 24; // Changed from limit
 
-    const response = await wpsClient.getItemsByVehicle(vehicleId, page, limit);
+    console.log("Fetching vehicle products:", { vehicleId, cursor, pageSize });
+
+    const response = await wpsClient.getItemsByVehicle(
+      vehicleId,
+      cursor,
+      pageSize,
+    );
 
     return NextResponse.json({
       success: true,
       data: response.data,
-      meta: response.meta,
-      links: response.links,
+      meta: response.meta, // Contains cursor pagination info
     });
   } catch (error) {
     console.error("WPS Vehicle Products API Error:", error);

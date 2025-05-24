@@ -12,10 +12,10 @@ export async function GET(request: NextRequest) {
       productType: searchParams.get("productType") || undefined,
       brandId: searchParams.get("brandId") || undefined,
       vehicleId: searchParams.get("vehicleId") || undefined,
-      page: searchParams.get("page") ? parseInt(searchParams.get("page")!) : 1,
-      limit: searchParams.get("limit")
-        ? parseInt(searchParams.get("limit")!)
-        : 24,
+      cursor: searchParams.get("cursor") || undefined, // Changed from page to cursor
+      pageSize: searchParams.get("pageSize")
+        ? parseInt(searchParams.get("pageSize")!)
+        : 24, // Changed from limit to pageSize
       sortBy: searchParams.get("sortBy") || undefined,
       sortOrder: (searchParams.get("sortOrder") as "asc" | "desc") || undefined,
     };
@@ -27,8 +27,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       success: true,
       data: response.data,
-      meta: response.meta,
-      links: response.links,
+      meta: response.meta, // Contains cursor pagination info
     });
   } catch (error) {
     console.error("WPS Products API Error:", error);

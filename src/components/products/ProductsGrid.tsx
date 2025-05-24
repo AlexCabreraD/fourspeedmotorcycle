@@ -46,8 +46,6 @@ export default function ProductsGrid({
     return (
       <div className="mb-6">
         <p className="text-gray-600">
-          Showing {paginationDisplay.start}-{paginationDisplay.end} of{" "}
-          {paginationDisplay.total} products
           {vehicleString && (
             <span className="text-green-600 font-medium">
               {" "}
@@ -127,8 +125,7 @@ export default function ProductsGrid({
       {products.length > 0 && (
         <div className="mt-8 pt-6 border-t border-gray-200">
           <div className="text-center text-sm text-gray-500">
-            Displaying {products.length} of {paginationDisplay.total} total
-            products
+            Displaying {products.length} products
             {vehicleString && (
               <span className="block mt-1 text-green-600 font-medium">
                 All shown products are compatible with your {vehicleString}

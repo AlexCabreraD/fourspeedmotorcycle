@@ -79,40 +79,49 @@ export interface WPSVehicleYear {
   modelId: string;
 }
 
-// Proper WPS Pagination Types (based on documentation)
-export interface WPSPaginationLinks {
-  first?: string;
-  last?: string;
-  prev?: string;
-  next?: string;
+// WPS Cursor-based Pagination Types
+export interface WPSCursor {
+  current: string | null;
+  prev: string | null;
+  next: string | null;
+  count: number;
 }
 
-export interface WPSPaginationMeta {
-  current_page: number;
-  from?: number;
-  last_page: number;
-  path: string;
-  per_page: number;
-  to?: number;
-  total: number;
+export interface WPSCursorMeta {
+  cursor: WPSCursor;
 }
 
 export interface WPSApiResponse<T> {
   data: T;
-  links?: WPSPaginationLinks;
-  meta?: WPSPaginationMeta;
+  meta: WPSCursorMeta;
 }
 
+// Enhanced filters with cursor support
 export interface ProductFilters {
   category?: string;
   search?: string;
   vehicleId?: string;
   brandId?: string;
   productType?: string;
-  page?: number;
-  limit?: number;
+  cursor?: string | null; // Replace page with cursor
+  pageSize?: number; // Replace limit with pageSize
   sortBy?: string;
   sortOrder?: "asc" | "desc";
+}
+
+// Cursor navigation result type
+export interface CursorPaginatedResult<T> {
+  data: T | null;
+  loading: boolean;
+  error: string | null;
+  cursor: WPSCursor | null;
+  hasNextPage: boolean;
+  hasPrevPage: boolean;
+  refetch: () => Promise<void>;
+  goToNextPage: () => void;
+  goToPrevPage: () => void;
+  goToFirstPage: () => void;
+  resetPagination: () => void;
 }
 
 // WPS API Raw Response Types (based on actual API structure)
@@ -220,7 +229,7 @@ export class WPSClient {
     return `${cleanDomain}${finalPath}/${imageData.filename}`;
   }
 
-  // PRODUCT METHODS WITH PROPER PAGINATION
+  // PRODUCT METHODS WITH CURSOR PAGINATION
   async getProducts(
     filters: ProductFilters = {},
   ): Promise<WPSApiResponse<WPSProduct[]>> {
@@ -240,11 +249,13 @@ export class WPSClient {
       params.set("filter[brand_id]", filters.brandId);
     }
 
-    // CORRECT WPS PAGINATION FORMAT
-    params.set("page[size]", String(filters.limit || 24));
-    if (filters.page && filters.page > 1) {
-      params.set("page[number]", String(filters.page));
+    // CURSOR-BASED PAGINATION (WPS API Format)
+    if (filters.cursor) {
+      params.set("page[cursor]", filters.cursor);
     }
+    // Note: If no cursor is provided, WPS API assumes page[cursor]=null (first page)
+
+    params.set("page[size]", String(filters.pageSize || 24));
 
     // Sorting (if supported by WPS API)
     if (filters.sortBy) {
@@ -275,7 +286,6 @@ export class WPSClient {
 
     return {
       data: transformedProducts,
-      links: response.links,
       meta: response.meta,
     };
   }
@@ -359,7 +369,7 @@ export class WPSClient {
     return productsWithImages;
   }
 
-  // VEHICLE METHODS WITH PROPER PAGINATION
+  // VEHICLE METHODS WITH CURSOR PAGINATION
   async getVehicleMakes(): Promise<WPSVehicleMake[]> {
     const params = new URLSearchParams();
     params.set("page[size]", "1000"); // Get all makes
@@ -410,13 +420,13 @@ export class WPSClient {
   }
 
   async getVehicles(
-    page: number = 1,
-    limit: number = 50,
+    cursor: string | null = null,
+    pageSize: number = 50,
   ): Promise<WPSApiResponse<WPSVehicle[]>> {
     const params = new URLSearchParams();
-    params.set("page[size]", String(limit));
-    if (page > 1) {
-      params.set("page[number]", String(page));
+    params.set("page[size]", String(pageSize));
+    if (cursor) {
+      params.set("page[cursor]", cursor);
     }
 
     const response = await this.fetch<WPSApiResponse<any[]>>(
@@ -425,20 +435,19 @@ export class WPSClient {
 
     return {
       data: response.data.map(transformWPSVehicle),
-      links: response.links,
       meta: response.meta,
     };
   }
 
   async getItemsByVehicle(
     vehicleId: string,
-    page: number = 1,
-    limit: number = 24,
+    cursor: string | null = null,
+    pageSize: number = 24,
   ): Promise<WPSApiResponse<WPSProduct[]>> {
     const params = new URLSearchParams();
-    params.set("page[size]", String(limit));
-    if (page > 1) {
-      params.set("page[number]", String(page));
+    params.set("page[size]", String(pageSize));
+    if (cursor) {
+      params.set("page[cursor]", cursor);
     }
     params.set("include", "inventory,images,brand");
 
@@ -458,7 +467,6 @@ export class WPSClient {
 
     return {
       data: productsWithImages,
-      links: response.links,
       meta: response.meta,
     };
   }
@@ -469,12 +477,28 @@ export class WPSClient {
     vehicleId: string,
   ): Promise<boolean> {
     try {
+      // Get first page of vehicle items to check
       const vehicleItemsResponse = await this.getItemsByVehicle(
         vehicleId,
-        1,
+        null,
         1000,
-      ); // Get many items to check
-      return vehicleItemsResponse.data.some((item) => item.sku === sku);
+      );
+
+      let found = vehicleItemsResponse.data.some((item) => item.sku === sku);
+
+      // If not found and there are more pages, continue searching
+      let nextCursor = vehicleItemsResponse.meta.cursor.next;
+      while (!found && nextCursor) {
+        const nextResponse = await this.getItemsByVehicle(
+          vehicleId,
+          nextCursor,
+          1000,
+        );
+        found = nextResponse.data.some((item) => item.sku === sku);
+        nextCursor = nextResponse.meta.cursor.next;
+      }
+
+      return found;
     } catch (error) {
       console.error("Error checking vehicle compatibility:", error);
       return false;
@@ -492,6 +516,42 @@ export class WPSClient {
       console.error("WPS API connection test failed:", error);
       return false;
     }
+  }
+
+  // Helper method to get all pages of data (use with caution for large datasets)
+  async getAllPages<T>(
+    endpoint: string,
+    pageSize: number = 100,
+    maxPages: number = 50, // Safety limit
+  ): Promise<T[]> {
+    const allData: T[] = [];
+    let cursor: string | null = null;
+    let pageCount = 0;
+
+    do {
+      if (pageCount >= maxPages) {
+        console.warn(
+          `Reached maximum page limit (${maxPages}) for ${endpoint}`,
+        );
+        break;
+      }
+
+      const params = new URLSearchParams();
+      params.set("page[size]", String(pageSize));
+      if (cursor) {
+        params.set("page[cursor]", cursor);
+      }
+
+      const response = await this.fetch<WPSApiResponse<T[]>>(
+        `${endpoint}?${params.toString()}`,
+      );
+
+      allData.push(...response.data);
+      cursor = response.meta.cursor.next;
+      pageCount++;
+    } while (cursor);
+
+    return allData;
   }
 }
 

@@ -5,81 +5,59 @@ import {
   WPSVehicleMake,
   WPSVehicleModel,
   WPSVehicleYear,
-  WPSPaginationMeta,
-  WPSPaginationLinks,
+  WPSCursor,
+  WPSCursorMeta,
   ProductFilters,
+  CursorPaginatedResult,
 } from "@/lib/wps-client";
 
-// Generic API response type
-interface ApiResponse<T> {
+// Generic API response type for cursor pagination
+interface CursorApiResponse<T> {
   success: boolean;
   data?: T;
   error?: string;
   message?: string;
-  meta?: WPSPaginationMeta;
-  links?: WPSPaginationLinks;
+  meta?: WPSCursorMeta;
 }
 
-// Pagination result type
-interface PaginatedResult<T> {
-  data: T | null;
-  loading: boolean;
-  error: string | null;
-  pagination: {
-    currentPage: number;
-    totalPages: number;
-    totalItems: number;
-    itemsPerPage: number;
-    hasNextPage: boolean;
-    hasPrevPage: boolean;
-  } | null;
-  refetch: () => Promise<void>;
-  goToPage: (page: number) => void;
-  nextPage: () => void;
-  prevPage: () => void;
-}
-
-// Enhanced hook for paginated API calls
-function usePaginatedApi<T>(
+// Enhanced hook for cursor-based API calls
+function useCursorPaginatedApi<T>(
   endpoint: string,
   dependencies: any[] = [],
-  initialPage: number = 1,
-): PaginatedResult<T> {
+  initialPageSize: number = 24,
+): CursorPaginatedResult<T> {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [currentPage, setCurrentPage] = useState<number>(initialPage);
-  const [pagination, setPagination] =
-    useState<PaginatedResult<T>["pagination"]>(null);
+  const [cursor, setCursor] = useState<WPSCursor | null>(null);
+  const [currentCursor, setCurrentCursor] = useState<string | null>(null);
+  const [pageSize] = useState<number>(initialPageSize);
 
   const fetchData = useCallback(
-    async (page: number = currentPage) => {
+    async (requestCursor: string | null = null) => {
       try {
         setLoading(true);
         setError(null);
 
-        // Add page parameter to endpoint
+        // Add cursor parameter to endpoint if provided
         const url = new URL(endpoint, window.location.origin);
-        if (page > 1) {
-          url.searchParams.set("page", String(page));
+        if (requestCursor) {
+          url.searchParams.set("cursor", requestCursor);
+        }
+        if (pageSize !== 24) {
+          url.searchParams.set("pageSize", String(pageSize));
         }
 
         const response = await fetch(url.toString());
-        const result: ApiResponse<T> = await response.json();
+        const result: CursorApiResponse<T> = await response.json();
 
         if (result.success && result.data) {
           setData(result.data);
 
-          // Extract pagination info
-          if (result.meta) {
-            setPagination({
-              currentPage: result.meta.current_page,
-              totalPages: result.meta.last_page,
-              totalItems: result.meta.total,
-              itemsPerPage: result.meta.per_page,
-              hasNextPage: result.meta.current_page < result.meta.last_page,
-              hasPrevPage: result.meta.current_page > 1,
-            });
+          // Set cursor information
+          if (result.meta?.cursor) {
+            setCursor(result.meta.cursor);
+            setCurrentCursor(result.meta.cursor.current);
           }
         } else {
           setError(result.error || "Failed to fetch data");
@@ -90,46 +68,52 @@ function usePaginatedApi<T>(
         setLoading(false);
       }
     },
-    [endpoint, currentPage, ...dependencies],
+    [endpoint, pageSize, ...dependencies],
   );
 
-  const goToPage = useCallback(
-    (page: number) => {
-      setCurrentPage(page);
-      fetchData(page);
-    },
-    [fetchData],
-  );
-
-  const nextPage = useCallback(() => {
-    if (pagination?.hasNextPage) {
-      goToPage(currentPage + 1);
+  const goToNextPage = useCallback(() => {
+    if (cursor?.next) {
+      fetchData(cursor.next);
     }
-  }, [pagination, currentPage, goToPage]);
+  }, [cursor, fetchData]);
 
-  const prevPage = useCallback(() => {
-    if (pagination?.hasPrevPage) {
-      goToPage(currentPage - 1);
+  const goToPrevPage = useCallback(() => {
+    if (cursor?.prev) {
+      fetchData(cursor.prev);
     }
-  }, [pagination, currentPage, goToPage]);
+  }, [cursor, fetchData]);
+
+  const goToFirstPage = useCallback(() => {
+    setCurrentCursor(null);
+    fetchData(null);
+  }, [fetchData]);
+
+  const resetPagination = useCallback(() => {
+    setCurrentCursor(null);
+    setCursor(null);
+    fetchData(null);
+  }, [fetchData]);
 
   useEffect(() => {
-    fetchData(currentPage);
+    fetchData(currentCursor);
   }, [fetchData]);
 
   return {
     data,
     loading,
     error,
-    pagination,
-    refetch: () => fetchData(currentPage),
-    goToPage,
-    nextPage,
-    prevPage,
+    cursor,
+    hasNextPage: cursor?.next !== null,
+    hasPrevPage: cursor?.prev !== null,
+    refetch: () => fetchData(currentCursor),
+    goToNextPage,
+    goToPrevPage,
+    goToFirstPage,
+    resetPagination,
   };
 }
 
-// Products Hook with Pagination
+// Products Hook with Cursor Pagination
 export function useProducts(filters: ProductFilters = {}) {
   const params = new URLSearchParams();
 
@@ -137,28 +121,35 @@ export function useProducts(filters: ProductFilters = {}) {
   if (filters.category) params.set("category", filters.category);
   if (filters.vehicleId) params.set("vehicleId", filters.vehicleId);
   if (filters.brandId) params.set("brandId", filters.brandId);
-  if (filters.limit) params.set("limit", String(filters.limit));
+  if (filters.pageSize) params.set("pageSize", String(filters.pageSize));
   if (filters.sortBy) params.set("sortBy", filters.sortBy);
   if (filters.sortOrder) params.set("sortOrder", filters.sortOrder);
 
   const endpoint = `/api/wps/products${params.toString() ? `?${params.toString()}` : ""}`;
 
-  return usePaginatedApi<WPSProduct[]>(
+  const result = useCursorPaginatedApi<WPSProduct[]>(
     endpoint,
     [
       filters.search,
       filters.category,
       filters.vehicleId,
       filters.brandId,
-      filters.limit,
+      filters.pageSize,
       filters.sortBy,
       filters.sortOrder,
     ],
-    filters.page || 1,
+    filters.pageSize || 24,
   );
+
+  return {
+    ...result,
+    // Additional computed properties for products
+    productCount: result.data?.length || 0,
+    isEmpty: result.data?.length === 0,
+  };
 }
 
-// Single Product Hook
+// Single Product Hook (no pagination needed)
 export function useProduct(sku: string) {
   const [data, setData] = useState<WPSProduct | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
@@ -172,7 +163,7 @@ export function useProduct(sku: string) {
       setError(null);
 
       const response = await fetch(`/api/wps/products/${sku}`);
-      const result: ApiResponse<WPSProduct> = await response.json();
+      const result: CursorApiResponse<WPSProduct> = await response.json();
 
       if (result.success && result.data) {
         setData(result.data);
@@ -198,7 +189,7 @@ export function useProduct(sku: string) {
   };
 }
 
-// Vehicle Makes Hook (no pagination needed - typically small dataset)
+// Vehicle Makes Hook (typically doesn't need pagination)
 export function useVehicleMakes() {
   const [data, setData] = useState<WPSVehicleMake[] | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -210,7 +201,7 @@ export function useVehicleMakes() {
       setError(null);
 
       const response = await fetch("/api/wps/vehicles/makes");
-      const result: ApiResponse<WPSVehicleMake[]> = await response.json();
+      const result: CursorApiResponse<WPSVehicleMake[]> = await response.json();
 
       if (result.success && result.data) {
         setData(result.data);
@@ -252,7 +243,8 @@ export function useVehicleModels(makeId?: string) {
       setError(null);
 
       const response = await fetch(endpoint);
-      const result: ApiResponse<WPSVehicleModel[]> = await response.json();
+      const result: CursorApiResponse<WPSVehicleModel[]> =
+        await response.json();
 
       if (result.success && result.data) {
         setData(result.data);
@@ -294,7 +286,7 @@ export function useVehicleYears(modelId?: string) {
       setError(null);
 
       const response = await fetch(endpoint);
-      const result: ApiResponse<WPSVehicleYear[]> = await response.json();
+      const result: CursorApiResponse<WPSVehicleYear[]> = await response.json();
 
       if (result.success && result.data) {
         setData(result.data);
@@ -315,11 +307,23 @@ export function useVehicleYears(modelId?: string) {
   return { data, loading, error, refetch: fetchData };
 }
 
-// Vehicle Products Hook with Pagination
-export function useVehicleProducts(vehicleId?: string, page: number = 1) {
+// Vehicle Products Hook with Cursor Pagination
+export function useVehicleProducts(vehicleId?: string, pageSize: number = 24) {
   const endpoint = vehicleId ? `/api/wps/vehicles/${vehicleId}/products` : "";
 
-  return usePaginatedApi<WPSProduct[]>(endpoint, [vehicleId], page);
+  const result = useCursorPaginatedApi<WPSProduct[]>(
+    endpoint,
+    [vehicleId],
+    pageSize,
+  );
+
+  return {
+    ...result,
+    // Don't return data if no vehicleId
+    data: vehicleId ? result.data : null,
+    loading: vehicleId ? result.loading : false,
+    error: vehicleId ? result.error : null,
+  };
 }
 
 // WPS Connection Test Hook
@@ -334,7 +338,7 @@ export function useWPSConnection() {
       setError(null);
 
       const response = await fetch("/api/wps/test-connection");
-      const result: ApiResponse<any> = await response.json();
+      const result: CursorApiResponse<any> = await response.json();
 
       setIsConnected(result.success);
       if (!result.success) {
@@ -355,7 +359,7 @@ export function useWPSConnection() {
   return { isConnected, loading, error, testConnection };
 }
 
-// Search Hook with debouncing and pagination
+// Search Hook with debouncing and cursor pagination
 export function useProductSearch(query: string, delay: number = 500) {
   const [debouncedQuery, setDebouncedQuery] = useState(query);
   const [isDebouncing, setIsDebouncing] = useState(false);
@@ -372,12 +376,102 @@ export function useProductSearch(query: string, delay: number = 500) {
 
   const result = useProducts({
     search: debouncedQuery,
-    limit: 12,
+    pageSize: 12,
   });
 
   return {
     ...result,
     loading: result.loading || isDebouncing,
     isDebouncing,
+  };
+}
+
+// Hook for infinite scrolling with cursor pagination
+export function useInfiniteProducts(filters: ProductFilters = {}) {
+  const [allProducts, setAllProducts] = useState<WPSProduct[]>([]);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [cursor, setCursor] = useState<WPSCursor | null>(null);
+  const [hasMore, setHasMore] = useState<boolean>(true);
+
+  const loadMore = useCallback(async () => {
+    if (loading || !hasMore) return;
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      const params = new URLSearchParams();
+      if (filters.search) params.set("search", filters.search);
+      if (filters.category) params.set("category", filters.category);
+      if (filters.vehicleId) params.set("vehicleId", filters.vehicleId);
+      if (filters.brandId) params.set("brandId", filters.brandId);
+      if (filters.pageSize) params.set("pageSize", String(filters.pageSize));
+      if (filters.sortBy) params.set("sortBy", filters.sortBy);
+      if (filters.sortOrder) params.set("sortOrder", filters.sortOrder);
+
+      // Add cursor for next page
+      if (cursor?.next) {
+        params.set("cursor", cursor.next);
+      }
+
+      const endpoint = `/api/wps/products${params.toString() ? `?${params.toString()}` : ""}`;
+      const response = await fetch(endpoint);
+      const result: CursorApiResponse<WPSProduct[]> = await response.json();
+
+      if (result.success && result.data) {
+        if (cursor?.next) {
+          // Append to existing products
+          setAllProducts((prev) => [...prev, ...result.data!]);
+        } else {
+          // First load or reset
+          setAllProducts(result.data);
+        }
+
+        // Update cursor and check if there are more items
+        if (result.meta?.cursor) {
+          setCursor(result.meta.cursor);
+          setHasMore(result.meta.cursor.next !== null);
+        } else {
+          setHasMore(false);
+        }
+      } else {
+        setError(result.error || "Failed to fetch products");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setLoading(false);
+    }
+  }, [loading, hasMore, cursor, filters]);
+
+  const reset = useCallback(() => {
+    setAllProducts([]);
+    setCursor(null);
+    setHasMore(true);
+    setError(null);
+  }, []);
+
+  // Load initial data when filters change
+  useEffect(() => {
+    reset();
+    loadMore();
+  }, [
+    filters.search,
+    filters.category,
+    filters.vehicleId,
+    filters.brandId,
+    filters.sortBy,
+    filters.sortOrder,
+  ]);
+
+  return {
+    products: allProducts,
+    loading,
+    error,
+    hasMore,
+    loadMore,
+    reset,
+    totalLoaded: allProducts.length,
   };
 }
