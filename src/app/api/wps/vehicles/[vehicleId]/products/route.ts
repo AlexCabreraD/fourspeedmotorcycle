@@ -1,6 +1,6 @@
-// src/app/api/wps/vehicles/[vehicleId]/products/route.ts
+// src/app/api/wps/vehicles/[vehicleId]/products/route.ts - Updated
 import { NextRequest, NextResponse } from "next/server";
-import { wpsClient, transformWPSProduct } from "@/lib/wps-client";
+import { wpsClient } from "@/lib/wps-client";
 
 export async function GET(
   request: NextRequest,
@@ -8,6 +8,7 @@ export async function GET(
 ) {
   try {
     const { vehicleId } = params;
+    const { searchParams } = new URL(request.url);
 
     if (!vehicleId) {
       return NextResponse.json(
@@ -16,12 +17,20 @@ export async function GET(
       );
     }
 
-    const products = await wpsClient.getItemsByVehicle(vehicleId);
-    const transformedProducts = products.map(transformWPSProduct);
+    const page = searchParams.get("page")
+      ? parseInt(searchParams.get("page")!)
+      : 1;
+    const limit = searchParams.get("limit")
+      ? parseInt(searchParams.get("limit")!)
+      : 24;
+
+    const response = await wpsClient.getItemsByVehicle(vehicleId, page, limit);
 
     return NextResponse.json({
       success: true,
-      data: transformedProducts,
+      data: response.data,
+      meta: response.meta,
+      links: response.links,
     });
   } catch (error) {
     console.error("WPS Vehicle Products API Error:", error);

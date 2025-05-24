@@ -16,6 +16,8 @@ export async function GET(request: NextRequest) {
       limit: searchParams.get("limit")
         ? parseInt(searchParams.get("limit")!)
         : 24,
+      sortBy: searchParams.get("sortBy") || undefined,
+      sortOrder: (searchParams.get("sortOrder") as "asc" | "desc") || undefined,
     };
 
     console.log("Fetching products with filters:", filters);
@@ -25,7 +27,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       success: true,
       data: response.data,
-      meta: response.meta || {},
+      meta: response.meta,
+      links: response.links,
     });
   } catch (error) {
     console.error("WPS Products API Error:", error);

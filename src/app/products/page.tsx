@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import {
   Search,
   Filter,
@@ -11,6 +11,9 @@ import {
   AlertCircle,
   Loader2,
   SlidersHorizontal,
+  ChevronLeft,
+  ChevronRight,
+  MoreHorizontal,
 } from "lucide-react";
 import { useProducts } from "@/hooks/useWPS";
 import { WPSProduct } from "@/lib/wps-client";
@@ -19,6 +22,8 @@ import ProductCard from "@/components/products/ProductCard";
 
 function ProductsPageContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
+
   const [searchQuery, setSearchQuery] = useState(
     searchParams.get("search") || "",
   );
@@ -28,7 +33,7 @@ function ProductsPageContent() {
   const [selectedBrand, setSelectedBrand] = useState(
     searchParams.get("brand") || "",
   );
-  const [currentPage, setCurrentPage] = useState(1);
+  const [sortBy, setSortBy] = useState("relevance");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [showFilters, setShowFilters] = useState(false);
 
@@ -36,23 +41,51 @@ function ProductsPageContent() {
   const vehicleId = searchParams.get("vehicleId");
   const vehicleString = searchParams.get("vehicle");
 
+  // Use the paginated products hook
   const {
     data: products,
     loading,
     error,
+    pagination,
     refetch,
+    goToPage,
+    nextPage,
+    prevPage,
   } = useProducts({
     search: searchQuery,
     category: selectedCategory,
     brandId: selectedBrand,
     vehicleId: vehicleId || undefined,
-    page: currentPage,
+    page: parseInt(searchParams.get("page") || "1"),
     limit: 24,
+    sortBy: sortBy === "relevance" ? undefined : sortBy,
+    sortOrder: sortBy.includes("_desc") ? "desc" : "asc",
   });
+
+  // Update URL when pagination changes
+  const updateURL = (newPage: number) => {
+    const params = new URLSearchParams(searchParams);
+    if (newPage > 1) {
+      params.set("page", String(newPage));
+    } else {
+      params.delete("page");
+    }
+    router.push(`/products?${params.toString()}`);
+  };
+
+  const handlePageChange = (page: number) => {
+    updateURL(page);
+    goToPage(page);
+    // Scroll to top of results
+    document.getElementById("products-section")?.scrollIntoView({
+      behavior: "smooth",
+    });
+  };
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    setCurrentPage(1);
+    // Reset to page 1 when searching
+    updateURL(1);
     refetch();
   };
 
@@ -70,7 +103,107 @@ function ProductsPageContent() {
     setSearchQuery("");
     setSelectedCategory("");
     setSelectedBrand("");
-    setCurrentPage(1);
+    setSortBy("relevance");
+    router.push("/products");
+  };
+
+  const handleSortChange = (newSort: string) => {
+    setSortBy(newSort);
+    updateURL(1); // Reset to page 1 when sorting
+  };
+
+  // Pagination component
+  const PaginationControls = () => {
+    if (!pagination || pagination.totalPages <= 1) return null;
+
+    const { currentPage, totalPages, hasNextPage, hasPrevPage } = pagination;
+
+    // Generate page numbers to show
+    const getPageNumbers = () => {
+      const pages = [];
+      const maxVisible = 7;
+
+      if (totalPages <= maxVisible) {
+        // Show all pages
+        for (let i = 1; i <= totalPages; i++) {
+          pages.push(i);
+        }
+      } else {
+        // Smart pagination
+        if (currentPage <= 4) {
+          // Show first pages
+          for (let i = 1; i <= 5; i++) {
+            pages.push(i);
+          }
+          pages.push("...");
+          pages.push(totalPages);
+        } else if (currentPage >= totalPages - 3) {
+          // Show last pages
+          pages.push(1);
+          pages.push("...");
+          for (let i = totalPages - 4; i <= totalPages; i++) {
+            pages.push(i);
+          }
+        } else {
+          // Show middle pages
+          pages.push(1);
+          pages.push("...");
+          for (let i = currentPage - 1; i <= currentPage + 1; i++) {
+            pages.push(i);
+          }
+          pages.push("...");
+          pages.push(totalPages);
+        }
+      }
+
+      return pages;
+    };
+
+    return (
+      <div className="flex items-center justify-center space-x-2 mt-8">
+        {/* Previous Button */}
+        <button
+          onClick={prevPage}
+          disabled={!hasPrevPage}
+          className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
+        >
+          <ChevronLeft className="w-4 h-4" />
+          <span className="hidden sm:inline">Previous</span>
+        </button>
+
+        {/* Page Numbers */}
+        <div className="flex items-center space-x-1">
+          {getPageNumbers().map((page, index) => (
+            <button
+              key={index}
+              onClick={() =>
+                typeof page === "number" ? handlePageChange(page) : undefined
+              }
+              disabled={page === "..."}
+              className={`w-10 h-10 flex items-center justify-center rounded-lg transition-colors ${
+                page === currentPage
+                  ? "bg-red-600 text-white"
+                  : page === "..."
+                    ? "cursor-default"
+                    : "border border-gray-300 hover:bg-gray-50"
+              }`}
+            >
+              {page === "..." ? <MoreHorizontal className="w-4 h-4" /> : page}
+            </button>
+          ))}
+        </div>
+
+        {/* Next Button */}
+        <button
+          onClick={nextPage}
+          disabled={!hasNextPage}
+          className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
+        >
+          <span className="hidden sm:inline">Next</span>
+          <ChevronRight className="w-4 h-4" />
+        </button>
+      </div>
+    );
   };
 
   return (
@@ -92,6 +225,18 @@ function ProductsPageContent() {
                     ? "Compatible parts and accessories for your vehicle"
                     : "Premium motorcycle parts and accessories"}
                 </p>
+                {pagination && (
+                  <p className="text-sm text-gray-500 mt-2">
+                    Showing{" "}
+                    {(pagination.currentPage - 1) * pagination.itemsPerPage + 1}
+                    -
+                    {Math.min(
+                      pagination.currentPage * pagination.itemsPerPage,
+                      pagination.totalItems,
+                    )}{" "}
+                    of {pagination.totalItems} products
+                  </p>
+                )}
               </div>
 
               {/* View Toggle and Filters */}
@@ -184,7 +329,7 @@ function ProductsPageContent() {
                     value={selectedCategory}
                     onChange={(e) => {
                       setSelectedCategory(e.target.value);
-                      setCurrentPage(1);
+                      updateURL(1); // Reset to page 1
                     }}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
                   >
@@ -208,7 +353,7 @@ function ProductsPageContent() {
                     </h4>
                     <p className="text-red-800 text-sm mb-3">{vehicleString}</p>
                     <button
-                      onClick={() => (window.location.href = "/products")}
+                      onClick={() => router.push("/products")}
                       className="text-red-600 text-sm underline hover:text-red-800"
                     >
                       View All Products
@@ -240,7 +385,7 @@ function ProductsPageContent() {
             </div>
 
             {/* Main Content */}
-            <div className="flex-1">
+            <div className="flex-1" id="products-section">
               {/* Loading State */}
               {loading && (
                 <div className="flex items-center justify-center py-12">
@@ -271,25 +416,43 @@ function ProductsPageContent() {
               {/* Products Grid/List */}
               {!loading && !error && products && (
                 <>
-                  {/* Results Info */}
+                  {/* Results Info and Sort */}
                   <div className="flex items-center justify-between mb-6">
-                    <p className="text-gray-600">
-                      Showing {products.length} products
-                      {vehicleString && (
-                        <span className="text-green-600 font-medium">
-                          {" "}
-                          compatible with your {vehicleString}
-                        </span>
+                    <div>
+                      {pagination && (
+                        <p className="text-gray-600">
+                          Showing{" "}
+                          {(pagination.currentPage - 1) *
+                            pagination.itemsPerPage +
+                            1}
+                          -
+                          {Math.min(
+                            pagination.currentPage * pagination.itemsPerPage,
+                            pagination.totalItems,
+                          )}{" "}
+                          of {pagination.totalItems} products
+                          {vehicleString && (
+                            <span className="text-green-600 font-medium">
+                              {" "}
+                              compatible with your {vehicleString}
+                            </span>
+                          )}
+                        </p>
                       )}
-                    </p>
+                    </div>
 
                     {/* Sort Options */}
-                    <select className="px-3 py-2 border border-gray-300 rounded-lg text-sm">
-                      <option>Sort by relevance</option>
-                      <option>Price: Low to High</option>
-                      <option>Price: High to Low</option>
-                      <option>Name: A to Z</option>
-                      <option>Brand</option>
+                    <select
+                      value={sortBy}
+                      onChange={(e) => handleSortChange(e.target.value)}
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                    >
+                      <option value="relevance">Sort by relevance</option>
+                      <option value="price_asc">Price: Low to High</option>
+                      <option value="price_desc">Price: High to Low</option>
+                      <option value="name_asc">Name: A to Z</option>
+                      <option value="name_desc">Name: Z to A</option>
+                      <option value="created_at_desc">Newest First</option>
                     </select>
                   </div>
 
@@ -313,49 +476,30 @@ function ProductsPageContent() {
                       </button>
                     </div>
                   ) : (
-                    <div
-                      className={`grid gap-6 ${
-                        viewMode === "grid"
-                          ? "grid-cols-1 md:grid-cols-2 lg:grid-cols-3"
-                          : "grid-cols-1"
-                      }`}
-                    >
-                      {products.map((product) => (
-                        <ProductCard
-                          key={product.id}
-                          product={product}
-                          viewMode={viewMode}
-                          showCompatibility={!!vehicleString}
-                          vehicleCompatible={true} // TODO: Implement actual compatibility check
-                          onAddToCart={handleAddToCart}
-                          onQuickView={handleQuickView}
-                        />
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Pagination */}
-                  {products.length > 0 && (
-                    <div className="mt-12 flex justify-center">
-                      <div className="flex items-center gap-2">
-                        <button
-                          disabled={currentPage === 1}
-                          onClick={() => setCurrentPage(currentPage - 1)}
-                          className="px-4 py-2 border border-gray-300 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-                        >
-                          Previous
-                        </button>
-                        <span className="px-4 py-2 text-gray-600">
-                          Page {currentPage}
-                        </span>
-                        <button
-                          onClick={() => setCurrentPage(currentPage + 1)}
-                          className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-                        >
-                          Next
-                        </button>
+                    <>
+                      <div
+                        className={`grid gap-6 ${
+                          viewMode === "grid"
+                            ? "grid-cols-1 md:grid-cols-2 lg:grid-cols-3"
+                            : "grid-cols-1"
+                        }`}
+                      >
+                        {products.map((product) => (
+                          <ProductCard
+                            key={product.id}
+                            product={product}
+                            viewMode={viewMode}
+                            showCompatibility={!!vehicleString}
+                            vehicleCompatible={true} // TODO: Implement actual compatibility check
+                            onAddToCart={handleAddToCart}
+                            onQuickView={handleQuickView}
+                          />
+                        ))}
                       </div>
-                    </div>
+
+                      {/* Pagination */}
+                      <PaginationControls />
+                    </>
                   )}
                 </>
               )}
