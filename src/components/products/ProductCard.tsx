@@ -1,7 +1,14 @@
 // src/components/products/ProductCard.tsx
 "use client";
 
-import { ShoppingCart, Eye, Package, AlertTriangle } from "lucide-react";
+import { useState } from "react";
+import {
+  ShoppingCart,
+  Eye,
+  Package,
+  AlertTriangle,
+  ImageIcon,
+} from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { WPSProduct } from "@/lib/wps-client";
 
@@ -22,6 +29,9 @@ export default function ProductCard({
   onAddToCart,
   onQuickView,
 }: ProductCardProps) {
+  const [imageError, setImageError] = useState(false);
+  const [imageLoading, setImageLoading] = useState(true);
+
   const handleAddToCart = () => {
     if (onAddToCart) {
       onAddToCart(product);
@@ -34,15 +44,41 @@ export default function ProductCard({
     }
   };
 
+  const handleImageError = () => {
+    setImageError(true);
+    setImageLoading(false);
+  };
+
+  const handleImageLoad = () => {
+    setImageLoading(false);
+  };
+
   const isInStock = product.inventory?.inStock || false;
-  const hasImages = product.images && product.images.length > 0;
+  const hasImages = product.images && product.images.length > 0 && !imageError;
   const displayPrice = product.price > 0 ? product.price : product.listPrice;
   const hasDiscount =
     product.listPrice && product.price > 0 && product.listPrice > product.price;
 
+  // Fallback image component
+  const ImageFallback = () => (
+    <div className="w-full h-full flex flex-col items-center justify-center text-gray-400 bg-gray-50">
+      <ImageIcon className="w-8 h-8 mb-2" />
+      <span className="text-xs">No Image</span>
+    </div>
+  );
+
+  // Loading placeholder
+  const ImageLoading = () => (
+    <div className="w-full h-full flex items-center justify-center bg-gray-100">
+      <div className="animate-pulse bg-gray-200 w-full h-full flex items-center justify-center">
+        <Package className="w-8 h-8 text-gray-300" />
+      </div>
+    </div>
+  );
+
   return (
     <div
-      className={`bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow border border-gray-200 ${
+      className={`bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow border border-gray-200 group ${
         viewMode === "list" ? "flex gap-4 p-4" : "overflow-hidden"
       }`}
     >
@@ -50,18 +86,24 @@ export default function ProductCard({
       <div
         className={`${
           viewMode === "list" ? "w-32 h-32 flex-shrink-0" : "aspect-square"
-        } bg-gray-100 relative overflow-hidden`}
+        } bg-gray-100 relative overflow-hidden rounded-lg`}
       >
-        {hasImages ? (
-          <img
-            src={product.images![0]}
-            alt={product.name}
-            className="w-full h-full object-cover hover:scale-105 transition-transform duration-300"
-          />
+        {hasImages && !imageError ? (
+          <>
+            {imageLoading && <ImageLoading />}
+            <img
+              src={product.images![0]}
+              alt={product.name}
+              className={`w-full h-full object-cover hover:scale-105 transition-transform duration-300 ${
+                imageLoading ? "opacity-0" : "opacity-100"
+              }`}
+              onError={handleImageError}
+              onLoad={handleImageLoad}
+              loading="lazy"
+            />
+          </>
         ) : (
-          <div className="w-full h-full flex items-center justify-center text-gray-400">
-            <Package className="w-8 h-8" />
-          </div>
+          <ImageFallback />
         )}
 
         {/* Status Badges */}
@@ -111,6 +153,7 @@ export default function ProductCard({
             <button
               onClick={handleQuickView}
               className="w-8 h-8 bg-white/90 hover:bg-white rounded-lg flex items-center justify-center shadow-lg"
+              title="Quick View"
             >
               <Eye className="w-4 h-4 text-gray-700" />
             </button>
@@ -155,6 +198,14 @@ export default function ProductCard({
             {product.dimensions.weight && (
               <span>Weight: {product.dimensions.weight} lbs</span>
             )}
+            {product.dimensions.length &&
+              product.dimensions.width &&
+              product.dimensions.height && (
+                <span className="ml-2">
+                  Dims: {product.dimensions.length}" ×{" "}
+                  {product.dimensions.width}" × {product.dimensions.height}"
+                </span>
+              )}
           </div>
         )}
 
@@ -199,6 +250,7 @@ export default function ProductCard({
               <button
                 onClick={handleQuickView}
                 className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg transition-colors flex items-center gap-2"
+                title="Quick View"
               >
                 <Eye className="w-4 h-4" />
                 View
@@ -215,6 +267,7 @@ export default function ProductCard({
                   ? "bg-red-600 hover:bg-red-700 text-white"
                   : "bg-gray-300 text-gray-500 cursor-not-allowed"
               }`}
+              title={isInStock ? "Add to Cart" : "Out of Stock"}
             >
               <ShoppingCart className="w-4 h-4" />
               {isInStock ? "Add to Cart" : "Out of Stock"}
@@ -229,6 +282,16 @@ export default function ProductCard({
               <span>Status: {product.status}</span>
               {product.upc && <span>UPC: {product.upc}</span>}
             </div>
+
+            {/* Show image count if multiple images */}
+            {hasImages && product.images && product.images.length > 1 && (
+              <div className="flex items-center gap-1 mt-1">
+                <ImageIcon className="w-3 h-3 text-gray-400" />
+                <span className="text-xs text-gray-400">
+                  +{product.images.length - 1} more
+                </span>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -140,12 +140,20 @@ interface WPSRawItem {
   updated_at: string;
 }
 
+// Updated WPS Image type based on actual API response
 interface WPSRawImage {
   id: number;
-  item_id: number;
-  url: string;
-  alt_text?: string;
-  sort_order?: number;
+  domain: string;
+  path: string;
+  filename: string;
+  alt?: string;
+  mime: string;
+  width: number;
+  height: number;
+  size: number;
+  signature: string;
+  created_at: string;
+  updated_at: string;
 }
 
 // Main WPS API Client Class
@@ -189,6 +197,27 @@ export class WPSClient {
       console.error("WPS API fetch error:", error);
       throw error;
     }
+  }
+
+  // Helper method to construct full image URLs
+  private constructImageUrl(imageData: WPSRawImage): string {
+    // Handle both with and without protocol
+    const domain = imageData.domain.startsWith("http")
+      ? imageData.domain
+      : `https://${imageData.domain}`;
+
+    // Remove trailing slash from domain if present
+    const cleanDomain = domain.replace(/\/$/, "");
+
+    // Ensure path starts with slash
+    const cleanPath = imageData.path.startsWith("/")
+      ? imageData.path
+      : `/${imageData.path}`;
+
+    // Remove trailing slash from path if present
+    const finalPath = cleanPath.replace(/\/$/, "");
+
+    return `${cleanDomain}${finalPath}/${imageData.filename}`;
   }
 
   // PRODUCT METHODS WITH PROPER PAGINATION
@@ -286,12 +315,20 @@ export class WPSClient {
     return transformWPSProduct(response, images);
   }
 
-  async getProductImages(itemId: string): Promise<WPSRawImage[]> {
+  async getProductImages(itemId: string): Promise<string[]> {
     try {
       const response = await this.fetch<WPSApiResponse<WPSRawImage[]>>(
         `/items/${itemId}/images`,
       );
-      return response.data || [];
+
+      if (!response.data || response.data.length === 0) {
+        return [];
+      }
+
+      // Transform WPS image objects to full URLs
+      return response.data.map((imageData) =>
+        this.constructImageUrl(imageData),
+      );
     } catch (error) {
       console.warn(`Failed to fetch images for item ${itemId}:`, error);
       return [];
@@ -464,7 +501,7 @@ export const wpsClient = new WPSClient();
 // Helper functions for data transformation
 export function transformWPSProduct(
   wpsData: WPSRawItem,
-  images: WPSRawImage[] = [],
+  images: string[] = [], // Now expects full URLs
 ): WPSProduct {
   return {
     id: wpsData.id.toString(),
@@ -478,7 +515,7 @@ export function transformWPSProduct(
     brandId: wpsData.brand_id.toString(),
     category: wpsData.product_type || "",
     productType: wpsData.product_type || "",
-    images: images.map((img) => img.url),
+    images: images, // Now contains full URLs
     inventory: {
       quantity: wpsData.status === "Active" ? 1 : 0,
       inStock: wpsData.status === "Active",
